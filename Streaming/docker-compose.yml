@@ -1,0 +1,156 @@
+version: "3"
+
+networks:
+  asvsp-project:
+    name: asvsp-project
+    external: true
+
+services:
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    container_name: zookeeper
+    hostname: zookeeper
+    ports:
+      - "2181:2181"
+    networks:
+      - asvsp-project
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    networks:
+      - asvsp-project
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - asvsp-project
+    command: >
+      bash -c "
+        echo 'Waiting for Kafka to be ready...'
+        sleep 10
+        echo 'Creating Kafka topic: air-quality-stream'
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka:9092 \
+          --topic air-quality-stream \
+          --partitions 3 \
+          --replication-factor 1
+        echo 'Topic created successfully!'
+        kafka-topics --list --bootstrap-server kafka:9092
+      "
+
+  air-quality-producer:
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
+    container_name: air-quality-producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    env_file:
+      - .env
+    networks:
+      - asvsp-project
+    restart: unless-stopped
+
+  # ── Elasticsearch for streaming results storage ──────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.16
+    container_name: elasticsearch
+    hostname: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+      - cluster.routing.allocation.disk.watermark.low=95%
+      - cluster.routing.allocation.disk.watermark.high=96%
+      - cluster.routing.allocation.disk.watermark.flood_stage=97%
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks:
+      - asvsp-project
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ── Kibana for streaming results visualization ───────────────────────
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.16
+    container_name: kibana
+    hostname: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - asvsp-project
+    restart: unless-stopped
+
+  # ── Spark Structured Streaming consumer (replaces old Python consumer) ─
+  spark-streaming-consumer:
+    image: spark-master-climate:custom
+    container_name: spark-streaming-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - PYSPARK_PYTHON=python3
+    volumes:
+      - ./spark-streaming:/app/streaming
+    networks:
+      - asvsp-project
+    restart: unless-stopped
+    command: >
+      /spark/bin/spark-submit
+        --master spark://spark-master:7077
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.0.1
+        /app/streaming/stream_processor.py
+
+volumes:
+  es-data:

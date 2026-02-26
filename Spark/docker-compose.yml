@@ -1,0 +1,61 @@
+networks:
+  asvsp-project:
+    name: asvsp-project
+    external: true
+
+services:
+  spark-master:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: spark-master-climate:custom
+    container_name: spark-master
+    ports:
+      - 8000:8080
+      - 7077:7077
+    environment:
+      - PYSPARK_PYTHON=python3
+    env_file:
+      - .env
+    networks:
+      - asvsp-project
+
+  spark-worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: spark-worker-climate:custom
+    container_name: spark-worker-1
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=8g
+      - SPARK_WORKER_CORES=5
+      - PYSPARK_PYTHON=python3
+    ports:
+      - 8001:8081
+    env_file:
+      - .env
+    networks:
+      - asvsp-project
+
+  spark-worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: spark-worker-climate:custom
+    container_name: spark-worker-2
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=8g
+      - SPARK_WORKER_CORES=5
+      - PYSPARK_PYTHON=python3
+    ports:
+      - 8002:8081
+    env_file:
+      - .env
+    networks:
+      - asvsp-project

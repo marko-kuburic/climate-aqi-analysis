@@ -1,0 +1,22 @@
+networks:
+  asvsp-project:
+    name: asvsp-project
+    external: true
+
+services:
+  mongodb:
+    image: mongo:8.2.3-noble
+    container_name: mongodb
+    ports:
+      - 27017:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - asvsp-project
+
+volumes:
+  mongodb_data:
+    driver: local
