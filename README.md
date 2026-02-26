@@ -19,41 +19,7 @@ Podaci o kvalitetu vazduha u realnom vremenu za Beograd putem [AQICN API](https:
 
 ## Arhitektura sistema
 
-```
-┌─────────────────┐    ┌──────────────┐    ┌────────────────────┐
-│  Kaggle CSV     │───▶│              │    │                    │
-│  ERA5 NetCDF    │───▶│  HDFS        │───▶│  Apache Spark      │
-└─────────────────┘    │  (raw zona)  │    │  (transformacije)  │
-                       │              │    │                    │
-                       │  HDFS        │◀───│                    │
-                       │  (transform  │    └────────┬───────────┘
-                       │   zona)      │             │
-                       └──────────────┘             ▼
-                                            ┌───────────────┐
-                                            │  Apache Spark  │
-                                            │  (analitički   │
-                                            │   upiti)       │
-                                            └───────┬───────┘
-                                                    │
-                                                    ▼
-                                            ┌───────────────┐
-                                            │  MongoDB       │──▶ Metabase
-                                            │  (curated zona │    (vizualizacija)
-                                            │   — batch)     │
-                                            └───────────────┘
-
-┌─────────────────┐    ┌──────────────┐    ┌────────────────────┐
-│  AQICN API      │───▶│  Kafka       │───▶│  Spark Structured  │
-│  (producer)     │    │  (Zookeeper) │    │  Streaming         │
-└─────────────────┘    └──────────────┘    └────────┬───────────┘
-                                                    │
-                                                    ▼
-                                            ┌───────────────┐
-                                            │ Elasticsearch  │──▶ Kibana
-                                            │ (curated zona  │    (vizualizacija)
-                                            │  — streaming)  │
-                                            └───────────────┘
-```
+![Arhitektura sistema](docs/architecture_diagram.png)
 
 ### Jezero podataka — 3 zone
 | Zona | Skladište | Putanja / Baza | Sadržaj |
